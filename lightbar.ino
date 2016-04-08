@@ -4,6 +4,7 @@
 // button once to start the first animation!
 
 #include <Adafruit_NeoPixel.h>
+#include <avr/eeprom.h>
 #ifdef __AVR__
   #include <avr/power.h>
 #endif
@@ -17,6 +18,8 @@
 #define LED 1
 #define PIXEL_COUNT 8
 
+
+
 // Parameter 1 = number of pixels in strip,  neopixel stick has 8
 // Parameter 2 = pin number (most are valid)
 // Parameter 3 = pixel type flags, add together as needed:
@@ -26,8 +29,10 @@
 //   NEO_KHZ800  800 KHz bitstream (e.g. High Density LED strip), correct for neopixel stick
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-bool oldState = HIGH;
-int showType = 0;
+bool oldState = LOW;
+int colour_state = 0; // 0 is hold colour, 1 is set new colour
+uint32_t colour;
+uint32_t addr = 1;
 
 void setup() {
     // This is for Trinket 5V 16MHz, you can remove these three lines if you are not using a Trinket
@@ -38,10 +43,17 @@ void setup() {
   pinMode(LED, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
   digitalWrite(BUTTON_PIN, HIGH);
-  //pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  // init the strip
   strip.begin();
-  strip.show(); // Initialize all pixels to 'off'
-  colorWipe(strip.Color(100, 0, 100), 50);    // initial
+  colorWipe(strip.Color(255,255,255), 50);
+  strip.show();
+  
+  // read saved colour from eeprom
+  while (!eeprom_is_ready());
+  colour = eeprom_read_dword((uint32_t *)addr);
+  colorWipe(colour, 100);
+  strip.show();
 }
 
 void loop() {
@@ -56,42 +68,26 @@ void loop() {
     // Check if button is still low after debounce.
     newState = digitalRead(BUTTON_PIN);
     if (newState == LOW) {
+      // button has been pressed
       digitalWrite(LED, LOW);
-      showType++;
-      if (showType > 3)
-        showType=0;
-      startShow(showType);
+      colour_state = !colour_state;
+      if (colour_state != 0) {
+        // run the rainbow until button press
+        colour = rainbow_button(30);
+        // save colour to eeprom 
+        eeprom_write_dword((uint32_t *)addr, colour);
+        delay(500);
+        colorWipe(strip.Color(0,0,0),10);
+        colorWipe(colour, 20);
+        colorWipe(strip.Color(0,0,0),10);
+        colorWipe(colour, 20);
+      }
     }
   }
-
   // Set the last button state to the old state.
   oldState = newState;
 }
 
-void startShow(int i) {
-  switch(i){
-    case 0: colorWipe(strip.Color(0, 0, 0), 10);    // Black/off
-            break;
-    case 1: colorWipe(strip.Color(255, 0, 0), 10);  // Red
-            break;
-    case 2: colorWipe(strip.Color(0, 255, 0), 10);  // Green
-            break;
-    case 3: colorWipe(strip.Color(0, 0, 255), 10);  // Blue
-            break;
-    case 4: theaterChase(strip.Color(127, 127, 127), 50); // White
-            break;
-    case 5: theaterChase(strip.Color(127,   0,   0), 50); // Red
-            break;
-    case 6: theaterChase(strip.Color(  0,   0, 127), 50); // Blue
-            break;
-    case 7: rainbow(20);
-            break;
-    case 8: rainbowCycle(20);
-            break;
-    case 9: theaterChaseRainbow(50);
-            break;
-  }
-}
 
 // Fill the dots one after the other with a color
 void colorWipe(uint32_t c, uint8_t wait) {
@@ -102,66 +98,31 @@ void colorWipe(uint32_t c, uint8_t wait) {
   }
 }
 
-void rainbow(uint8_t wait) {
+uint32_t rainbow_button(uint8_t wait) {
   uint16_t i, j;
+  bool button = LOW;
 
-  for(j=0; j<256; j++) {
-    for(i=0; i<strip.numPixels(); i++) {
-      strip.setPixelColor(i, Wheel((i+j) & 255));
-    }
-    strip.show();
-    delay(wait);
-  }
-}
-
-// Slightly different, this makes the rainbow equally distributed throughout
-void rainbowCycle(uint8_t wait) {
-  uint16_t i, j;
-
-  for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
-    for(i=0; i< strip.numPixels(); i++) {
-      strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
-    }
-    strip.show();
-    delay(wait);
-  }
-}
-
-//Theatre-style crawling lights.
-void theaterChase(uint32_t c, uint8_t wait) {
-  for (int j=0; j<10; j++) {  //do 10 cycles of chasing
-    for (int q=0; q < 3; q++) {
-      for (int i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, c);    //turn every third pixel on
+  do {
+    digitalWrite(LED, HIGH);
+    delay(1000);
+    digitalWrite(LED, LOW);
+      
+    for(j=0; j<256; j++) {
+      for(i=0; i<strip.numPixels(); i++) {
+        strip.setPixelColor(i, Wheel((i+j) & 255));
       }
       strip.show();
-
       delay(wait);
-
-      for (int i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      button = digitalRead(BUTTON_PIN);
+      if (button == LOW) {
+        return Wheel(i+j);
       }
-    }
-  }
+    }   
+  } while (button == HIGH);
+
+  return Wheel(i+j);
 }
 
-//Theatre-style crawling lights with rainbow effect
-void theaterChaseRainbow(uint8_t wait) {
-  for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
-    for (int q=0; q < 3; q++) {
-      for (int i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
-      }
-      strip.show();
-
-      delay(wait);
-
-      for (int i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, 0);        //turn every third pixel off
-      }
-    }
-  }
-}
 
 // Input a value 0 to 255 to get a color value.
 // The colours are a transition r - g - b - back to r.
