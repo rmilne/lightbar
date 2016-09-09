@@ -16,7 +16,7 @@
 
 #define PIXEL_PIN    0    // Digital IO pin connected to the NeoPixels.
 #define LED 1
-#define PIXEL_COUNT 8
+#define PIXEL_COUNT 12
 
 
 
